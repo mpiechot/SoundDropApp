@@ -1,0 +1,120 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.WebUtilities
+@using SoundDrop.Models
+@using SoundDrop.Services
+
+@inject ISpotifyService Spotify
+@inject IConfiguration Configuration
+@inject NavigationManager NavManager
+
+@rendermode InteractiveServer
+
+
+
+@if (Spotify.IsLoggedIn)
+{
+    <h3>Spotify Suche</h3>
+
+    <input @bind="query" placeholder="Lied, Artist ..." />
+    <button @onclick="Suche">Suchen</button>
+}
+else
+{
+    <a href="@GetSpotifyLoginUrl()" class="btn btn-primary">Login mit Spotify</a>
+}
+
+@if (tracks.Any())
+{
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Cover</th>
+                <th>Titel</th>
+                <th>Artist</th>
+                <th></th> <!-- Für den Button -->
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var track in tracks)
+            {
+                <tr>
+                    <td style="width: 72px;">
+                        <img src="@track.ThumbnailUrl" alt="Cover" class="img-thumbnail" style="width: 64px; height: 64px; object-fit: cover;" />
+                    </td>
+                    <td>@track.Name</td>
+                    <td>@track.Artist</td>
+                    <td>
+                        <button class="btn btn-sm btn-success" @onclick="() => AddToQueue(track.Uri)">
+                            Zur Warteschlange
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string query = "";
+    private List<TrackModel> tracks = new();
+
+    protected override void OnInitialized()
+    {
+        // Check ob "code" in der URL vorhanden ist
+        var uri = NavManager.ToAbsoluteUri(NavManager.Uri);
+        var queryParams = QueryHelpers.ParseQuery(uri.Query);
+        if (!Spotify.HasAccessToken && queryParams.TryGetValue("code", out var code))
+        {
+            Spotify.SetAuthenticationCode(code!);
+            Console.WriteLine($"Empfangener Auth-Code: {code}");
+            _ = Spotify.AuthenticateAsync();
+        }
+    }
+
+    private async Task Suche()
+    {
+        try
+        {
+            tracks.Clear();
+            tracks.AddRange(await Spotify.SearchTracksAsync(query));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fehler: {ex.Message}");
+        }
+    }
+
+    private async Task AddToQueue(string uri)
+    {
+        try
+        {
+            await Spotify.AddTrackToQueueAsync(uri);
+            Console.WriteLine($"Zur Warteschlange hinzugefügt: {uri}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fehler beim Hinzufügen: {ex.Message}");
+        }
+    }
+
+    private string GetSpotifyLoginUrl()
+    {
+        var clientId = Configuration["Spotify:ClientId"];
+
+        if (clientId == null)
+        {
+            Console.Error.WriteLine("No ClientID provided");
+            return string.Empty;
+        }
+
+        var redirectUri = "https://127.0.0.1:7041/"; // Zeigt auf Home.razor
+        var scopes = "user-read-playback-state user-modify-playback-state";
+
+        return $"https://accounts.spotify.com/authorize" +
+               $"?response_type=code" +
+               $"&client_id={Uri.EscapeDataString(clientId)}" +
+               "&show_dialog=true" +
+               $"&scope={Uri.EscapeDataString(scopes)}" +
+               $"&redirect_uri={Uri.EscapeDataString(redirectUri)}";
+    }
+}
